@@ -1,0 +1,586 @@
+import {
+  DislikeFilled,
+  InfoCircleOutlined,
+  LikeFilled,
+  PhoneFilled,
+} from '@ant-design/icons';
+import { Col, Row } from 'antd5';
+import { get, startCase } from 'lodash';
+import moment from 'moment';
+import { useContext, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/router';
+import { Box, Flex, Image, Text } from 'rebass/styled-components';
+import { AppContext } from '../../context/appContext';
+import { InsuranceContext } from '../../context/insuranceContext';
+import { iconsMap } from '../../helpers/constants';
+import theme from '../../styles/theme';
+import AssignedTo from '../assignedTo';
+import Tags from '../tags';
+import { ArrayHelper, dateFormat } from '../../helpers/helperFunctions';
+
+const multiStatusPhases = ['PAYMENT_APPROVAL', 'DISCHARGE_DOCS_APPROVAL'];
+
+const WhatsappIcon = ({ onClick, status }) => {
+  if (status === 'unread') {
+    return (
+      <Box
+        style={{
+          position: 'relative',
+          cursor: 'pointer',
+        }}
+      >
+        <Image
+          src={iconsMap.whatsAppIcon}
+          style={{
+            height: 30,
+            width: 30,
+            zIndex: '2',
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick();
+          }}
+        />
+        <Box
+          style={{
+            position: 'absolute',
+            height: 10,
+            borderRadius: 10,
+            width: 10,
+            top: 2,
+            right: 20,
+            backgroundColor: 'red',
+          }}
+        />
+      </Box>
+    );
+  }
+  if (status === 'active') {
+    return (
+      <Image
+        src={iconsMap.whatsAppIcon}
+        style={{
+          height: 30,
+          width: 30,
+          cursor: 'pointer',
+        }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+      />
+    );
+  } else {
+    return (
+      <Image
+        src={iconsMap.whatsAppError}
+        style={{
+          height: 30,
+          width: 30,
+          cursor: 'not-allowed',
+        }}
+      />
+    );
+  }
+};
+
+const StatusIconsMaps = {
+  IN_PROGRESS: (
+    <Text
+      style={{
+        color: 'white',
+        backgroundColor: '#F79009',
+        padding: '5px',
+        borderRadius: '100%',
+        width: '20px',
+        height: '20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      ···
+    </Text>
+  ),
+  APPROVED: (
+    <LikeFilled
+      style={{
+        color: 'white',
+        backgroundColor: '#12B76A',
+        padding: '5px',
+        borderRadius: '100%',
+        width: '20px',
+        height: '20px',
+      }}
+    />
+  ),
+  REJECTED: (
+    <DislikeFilled
+      style={{
+        color: 'white',
+        backgroundColor: '#F04438',
+        padding: '5px',
+        borderRadius: '100%',
+        width: '20px',
+        height: '20px',
+      }}
+    />
+  ),
+};
+
+function CaseCard(props: {
+  customerName?: string;
+  customerNumber?: string;
+  secondaryNumber?: string;
+  queryCount?: number;
+  status?: string;
+  progressPhase?: any;
+  cityId?: string;
+  hospitalName?: string;
+  OnClickFunction?: Function;
+  setForceUpdate?: Function;
+  onWhatsappClick?: Function;
+  whatsappStatus?: any;
+  createdOn: number | string;
+  insuranceCaseId: number | string;
+  resolvedQueryCount: number;
+  insurancePatientCounsellingDetail: any;
+  insuranceCaseDetails: any;
+}) {
+  const {
+    customerName,
+    customerNumber,
+    queryCount,
+    status,
+    progressPhase,
+    cityId,
+    hospitalName,
+    OnClickFunction,
+    setForceUpdate,
+    onWhatsappClick,
+    whatsappStatus,
+    resolvedQueryCount,
+    insurancePatientCounsellingDetail,
+    insuranceCaseId,
+    insuranceCaseDetails,
+  } = props;
+  const { appState, getAllCities } = useContext(AppContext);
+  const { updateAssignee } = useContext(InsuranceContext);
+
+  const { autoCompleteCities, userDetails, allCities } = appState;
+
+  const { caseCount = 0 } = insuranceCaseDetails || {};
+
+  const router = useRouter();
+  const { tab } = router?.query;
+
+  useEffect(() => {
+    if (appState && allCities.length === 0) {
+      getAllCities();
+    }
+  }, []);
+
+  const customerCity = useMemo(
+    () => autoCompleteCities.find((city) => city.value === cityId),
+    [cityId],
+  );
+
+  const { subPhases } = progressPhase;
+
+  const NoQuerySubPhases = useMemo(() => {
+    if (
+      progressPhase?.phaseType === 'INSURANCE_DOCS_APPROVAL' &&
+      ArrayHelper.isArray(subPhases)
+    ) {
+      return subPhases
+        .filter(
+          (subPhase) =>
+            subPhase?.noQueriesPresent &&
+            subPhase?.queryCount === 0 &&
+            subPhase.status === 'IN_PROGRESS',
+        )
+        .map((item) => item?.subPhaseType);
+    }
+    return null;
+  }, [progressPhase]);
+
+  const updateAssignTo = (data, handleVisibleChange) => {
+    const { insuranceCaseId, assignedTo, ...restData } = data;
+    updateAssignee(
+      insuranceCaseId,
+      { ...restData, user: userDetails?.email, assignTo: assignedTo },
+      () => {
+        setForceUpdate(new Date());
+        handleVisibleChange(false);
+      },
+    );
+  };
+
+  const renderUpdatePatientCounselling = () => {
+    if (insurancePatientCounsellingDetail?.consentStatus === 'AGREED') {
+      return null;
+    }
+    const iconMapping = {
+      NOT_STARTED: 'IN_PROGRESS',
+      COMPLETED: 'APPROVED',
+      IN_PROGRESS: 'IN_PROGRESS',
+    };
+    const {
+      id: counsellingId,
+      counsellingStatus,
+      patientConsentToTheTerms,
+    } = insurancePatientCounsellingDetail || {};
+
+    if (!counsellingId) {
+      return null;
+    }
+    let conStatus = 'IN_PROGRESS';
+    if (patientConsentToTheTerms) {
+      conStatus = 'APPROVED';
+    }
+
+    return (
+      <Flex alignItems={'flex-start'} sx={{ gap: '4px' }}>
+        {StatusIconsMaps[conStatus]}
+        <Flex flexDirection={'column'}>
+          <Text sx={{ fontSize: '12px' }}>{'Patient Counselling'}</Text>
+          <AssignedTo
+            text={`${
+              insurancePatientCounsellingDetail?.assignedTo || 'NOT_ASSIGNED'
+            }`}
+            insuranceData={{
+              counsellingId: counsellingId,
+              insuranceCaseId: insuranceCaseId,
+              permissionType: 'CENTRAL_INSURANCE_TEAM',
+            }}
+            phaseType={'INSURANCE_COUNSELLING'}
+            updateAssignTo={updateAssignTo}
+            userDetails={userDetails}
+            canEdit={true}
+          />
+        </Flex>
+      </Flex>
+    );
+  };
+  let multiStatus = [];
+  if (multiStatusPhases.includes(status) && ArrayHelper.isArray(subPhases)) {
+    subPhases.forEach((subPhase) => {
+      if (subPhase?.status === 'IN_PROGRESS')
+        multiStatus.push(subPhase?.subPhaseType || '');
+      else if (subPhase?.status === 'REJECTED')
+        multiStatus.push(`REJECTED_${subPhase?.subPhaseType || ''}`);
+    });
+  }
+
+  let showDiagnosisApprovalState = false;
+  if (status === 'INSURANCE_DOCS_APPROVAL') {
+    showDiagnosisApprovalState = true;
+    if (tab === 'PendingCases' || !tab) {
+      let isFinanceAgent = subPhases.find(
+        (x) =>
+          x.subPhaseType === 'FINANCE_ELIGIBILITY_APPROVAL' &&
+          x.assignedTo === userDetails?.email,
+      );
+      if (isFinanceAgent) {
+        showDiagnosisApprovalState = false;
+      }
+    }
+  }
+
+  return (
+    <Box
+      onClick={() => !!OnClickFunction && OnClickFunction()}
+      sx={{
+        padding: ['16px'],
+        cursor: 'pointer',
+        ':hover': { backgroundColor: 'grey100' },
+      }}
+    >
+      <Row>
+        <Col xs={24} sm={16} md={16} lg={16}>
+          <Box>
+            <Text sx={styles.name}>{customerName}</Text>
+            <Box display={'flex'}>
+              {props.insuranceCaseId ? (
+                <Text fontSize={12} fontWeight={500} color={'text'}>
+                  {`Insurance ID: `}
+                  {props.insuranceCaseId}
+                </Text>
+              ) : null}
+              {props.createdOn ? (
+                <Text fontSize={12} fontWeight={500} color={'text'} ml="4">
+                  {`Created on: `}
+                  {moment(props.createdOn).format('DD MMM YYYY, h:mm a')}
+                </Text>
+              ) : null}
+            </Box>
+            <Flex flexDirection={'row'} sx={{ gap: '18.5px', mt: '8px' }}>
+              {customerNumber && (
+                <Text sx={styles.phoneNumber}>
+                  <PhoneFilled
+                    rotate={90}
+                    style={{ fontSize: '15px', color: theme.colors.blue700 }}
+                  />
+                  {customerNumber}
+                </Text>
+              )}
+              {customerCity && (
+                <Text sx={styles.phoneNumber}>
+                  <Image src={iconsMap.location} width={12} height={17} />
+                  {customerCity.text}
+                </Text>
+              )}
+              {hospitalName && (
+                <Text sx={styles.phoneNumber} title={hospitalName}>
+                  <Image src={iconsMap.building} width={12} height={17} />
+                  <Text
+                    as="span"
+                    sx={{
+                      display: 'inline',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      maxWidth: '150px',
+                    }}
+                  >
+                    {hospitalName}
+                  </Text>
+                </Text>
+              )}
+              {caseCount && caseCount <= 10 ? (
+                <Image
+                  src={iconsMap.blueFirst10Tag}
+                  style={{
+                    height: '24px',
+                    width: '56px',
+                  }}
+                />
+              ) : null}
+              {whatsappStatus && (
+                <WhatsappIcon
+                  onClick={() => onWhatsappClick()}
+                  status={whatsappStatus}
+                />
+              )}
+            </Flex>
+          </Box>
+        </Col>
+        <Col xs={24} sm={8} md={8} lg={8}>
+          <Flex
+            flexDirection={['row', 'column']}
+            sx={{
+              alignItems: 'flex-end',
+              gap: '8px',
+              mt: ['13px', '0px'],
+            }}
+          >
+            {Array.isArray(multiStatus) && multiStatus.length ? (
+              multiStatus.map((i) => {
+                if (!i) return null;
+                return <Tags size={'small'} border status={i} type="CASE" />;
+              })
+            ) : (
+              <>
+                {!!status && (
+                  <Tags size={'small'} border status={status} type="CASE" />
+                )}
+              </>
+            )}
+            {showDiagnosisApprovalState ? (
+              <Tags
+                size={'small'}
+                border
+                text={
+                  insuranceCaseDetails?.diagnosisApprovedByMedical
+                    ? 'Diagnosis Approved'
+                    : 'Diagnosis Approval Pending'
+                }
+                variant="blue"
+              />
+            ) : null}
+            {status === 'DISCHARGE_DOCS_APPROVAL' &&
+            get(
+              insuranceCaseDetails,
+              'treatmentDetails.tentativeDischargeDate',
+              null,
+            ) &&
+            multiStatus.length === 0 ? (
+              <Tags
+                size={'small'}
+                text={`Discharge Date: ${dateFormat(
+                  get(
+                    insuranceCaseDetails,
+                    'treatmentDetails.tentativeDischargeDate',
+                    '',
+                  ),
+                )}`}
+                variant="blue"
+              />
+            ) : null}
+            {status === 'INITIATE_ADMISSION' &&
+            get(
+              insuranceCaseDetails,
+              'treatmentDetails.tentativeAdmissionDate',
+              null,
+            ) ? (
+              <Tags
+                size={'small'}
+                text={`Admission Date: ${dateFormat(
+                  get(
+                    insuranceCaseDetails,
+                    'treatmentDetails.tentativeAdmissionDate',
+                    '',
+                  ),
+                )}`}
+                variant="blue"
+              />
+            ) : null}
+            {NoQuerySubPhases && NoQuerySubPhases.length > 0
+              ? NoQuerySubPhases.map((subPhase) => {
+                  const text = {
+                    FINANCE_ELIGIBILITY_APPROVAL: 'Finance Team',
+                    NON_MEDICAL_APPROVAL: 'Non Medical Team',
+                  };
+                  return (
+                    <Tags
+                      size={'small'}
+                      text={`No Query from ${text[subPhase] || 'team'}`}
+                      variant="grey"
+                      border
+                    />
+                  );
+                })
+              : null}
+
+            {!!queryCount && (
+              <Tags
+                variant="red"
+                size={'small'}
+                text={
+                  resolvedQueryCount
+                    ? `${resolvedQueryCount}/${
+                        resolvedQueryCount + queryCount
+                      } Query reply received`
+                    : `${queryCount} Query raised`
+                }
+                icon={<InfoCircleOutlined />}
+              />
+            )}
+          </Flex>
+        </Col>
+      </Row>
+      {!subPhases?.length ? (
+        <Row>
+          <Flex
+            flexDirection={'row'}
+            flexWrap={'wrap'}
+            sx={{
+              columnGap: '10px',
+              rowGap: '12px',
+              mt: '12px',
+              width: '100%',
+            }}
+          >
+            {renderUpdatePatientCounselling()}
+          </Flex>
+        </Row>
+      ) : null}
+      {Object.keys(progressPhase).length > 0 && subPhases?.length && (
+        <Row>
+          <Flex
+            flexDirection={'row'}
+            flexWrap={'wrap'}
+            sx={{
+              columnGap: '10px',
+              rowGap: '12px',
+              mt: '12px',
+              width: '100%',
+            }}
+          >
+            {renderUpdatePatientCounselling()}
+            {subPhases?.map((subPhase: any) => {
+              let canEdit = true;
+              let phaseType = subPhase?.subPhaseType;
+              if (subPhase.subPhaseType === 'HOSPITAL_PDC') return null;
+              if (subPhase.subPhaseType === 'AYU_PDC') {
+                if (
+                  subPhase?.currentlyAssignedTo === 'CENTRAL_INSURANCE_TEAM'
+                ) {
+                  canEdit = true;
+                } else canEdit = false;
+              }
+              if (subPhase.subPhaseType === 'FAL_ACCEPTANCE') {
+                const currentlyAssignedTo = get(
+                  progressPhase,
+                  'surgeryDischargeApprovalInfo.falAcceptanceInfo.currentlyAssignedTo',
+                  '',
+                );
+                if (currentlyAssignedTo === 'HOSPITAL_INSURANCE_TEAM') {
+                  canEdit = false;
+                } else {
+                  canEdit = true;
+                  phaseType = currentlyAssignedTo;
+                }
+              }
+              let text = startCase(subPhase.subPhaseType);
+              if (text === 'FINANCE ELIGIBILITY APPROVAL') {
+                text = 'FINANCE APPROVAL';
+              }
+              const isNonMedicalDeniedCase =
+                subPhase.subPhaseType === 'NON_MEDICAL_APPROVAL' &&
+                get(
+                  progressPhase,
+                  'insuranceDocsApprovalInfo.nonMedicalDeniedCase',
+                  false,
+                );
+              if (subPhase.status === 'ON_HOLD') return null;
+              return (
+                <Flex alignItems={'flex-start'} sx={{ gap: '4px' }}>
+                  {
+                    StatusIconsMaps[
+                      isNonMedicalDeniedCase ? 'REJECTED' : subPhase.status
+                    ]
+                  }
+                  <Flex flexDirection={'column'}>
+                    <Text sx={{ fontSize: '12px' }}>{text}</Text>
+                    <AssignedTo
+                      text={`${subPhase?.assignedTo || 'NOT_ASSIGNED'}`}
+                      insuranceData={{
+                        phaseId: null,
+                        subPhaseId: subPhase?.subPhaseId,
+                        insuranceCaseId: progressPhase?.insuranceCaseId,
+                        permissionType: 'CENTRAL_INSURANCE_TEAM',
+                      }}
+                      phaseType={phaseType}
+                      updateAssignTo={updateAssignTo}
+                      userDetails={userDetails}
+                      canEdit={canEdit}
+                    />
+                  </Flex>
+                </Flex>
+              );
+            })}
+          </Flex>
+        </Row>
+      )}
+    </Box>
+  );
+}
+const styles = {
+  name: {
+    color: theme.colors.text,
+    fontSize: '16px',
+    fontWeight: '600',
+    lineHeight: '150%',
+  },
+  phoneNumber: {
+    color: theme.colors.text,
+    fontSize: '14px',
+    fontWeight: '500',
+    lineHeight: '150%',
+    gap: '10px',
+    display: 'flex',
+    alignItems: 'center',
+  },
+};
+export default CaseCard;
